@@ -248,17 +248,7 @@ io.on('connection', (socket) => {
 
   socket.on('input', (data) => {
     if (players[socket.id]) {
-      players[socket.id].input = {
-        x: data.x !== undefined ? data.x : players[socket.id].input.x,
-        y: data.y !== undefined ? data.y : players[socket.id].input.y,
-        boost: data.boost !== undefined ? data.boost : players[socket.id].input.boost
-      };
-    }
-  });
-
-  socket.on('boost', (isBoosting) => {
-    if (players[socket.id]) {
-      players[socket.id].input.boost = isBoosting;
+      players[socket.id].input = data;
     }
   });
 

@@ -17,7 +17,6 @@ const massEl = document.getElementById('mass');
 const dashCooldownEl = document.getElementById('dashCooldown');
 const splitCooldownEl = document.getElementById('splitCooldown');
 const mobileControls = document.getElementById('mobileControls');
-const leaderboard = document.getElementById('leaderboard');
 
 // Game state
 let socket;
@@ -31,11 +30,6 @@ let camera = { x: 0, y: 0 };
 let selectedColor = '#ff6b6b';
 let selectedShape = 'circle';
 let gameRunning = false;
-
-// Performance optimization: throttle rendering
-let lastRenderTime = 0;
-const TARGET_FPS = 60;
-const FRAME_INTERVAL = 1000 / TARGET_FPS;
 
 // Colors and shapes
 const colors = ['#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd', '#00d2d3', '#1dd1a1', '#ff6348', '#c8d6e5'];
@@ -104,14 +98,13 @@ socket.on('connect', () => {
     console.log('Connected to server');
 });
 
-socket.on('gameInit', (data) => {
-    playerId = data.playerId;
-    console.log('Game initialized with player ID:', playerId);
+socket.on('playerId', (id) => {
+    playerId = id;
 });
 
 socket.on('gameState', (state) => {
     players = state.players;
-    foods = state.foods || [];
+    foods = state.foods;
     
     if (players[playerId]) {
         myPlayer = players[playerId];
@@ -119,13 +112,11 @@ socket.on('gameState', (state) => {
         
         // Update UI
         scoreEl.textContent = `Score: ${Math.floor(myPlayer.score || 0)}`;
-        massEl.textContent = `Mass: ${Math.floor(myPlayer.radius || 20)}`;
+        massEl.textContent = `Mass: ${Math.floor(myPlayer.mass || 10)}`;
         
-        // Update camera to follow player smoothly
-        const targetCamX = myPlayer.x - canvas.width / 2;
-        const targetCamY = myPlayer.y - canvas.height / 2;
-        camera.x += (targetCamX - camera.x) * 0.1;
-        camera.y += (targetCamY - camera.y) * 0.1;
+        // Update camera
+        camera.x = myPlayer.x - canvas.width / 2;
+        camera.y = myPlayer.y - canvas.height / 2;
     }
 });
 
@@ -148,20 +139,20 @@ socket.on('playerDisconnected', (id) => {
     delete players[id];
 });
 
-socket.on('death', (data) => {
+socket.on('gameOver', (data) => {
     gameRunning = false;
     mainMenu.style.display = 'flex';
     hud.style.display = 'none';
-    alert(`Game Over! You were eaten by ${data.killer}`);
+    alert(`Game Over! Final Score: ${data.score}`);
 });
 
 // Play button
 playBtn.addEventListener('click', () => {
     const name = playerNameInput.value.trim() || 'Player';
-    socket.emit('join', {
+    socket.emit('joinGame', {
         name: name,
         color: selectedColor,
-        skin: selectedShape
+        shape: selectedShape
     });
     
     mainMenu.style.display = 'none';
@@ -173,289 +164,93 @@ playBtn.addEventListener('click', () => {
     }
 });
 
-// Mobile button handlers
-const dashBtn = document.getElementById('dashBtn');
-const splitBtn = document.getElementById('splitBtn');
-
-if (dashBtn) {
-    dashBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (gameRunning && myPlayer) {
-            socket.emit('boost', true);
-        }
-    }, { passive: false });
-    
-    dashBtn.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (gameRunning && myPlayer) {
-            socket.emit('boost', false);
-        }
-    });
-    
-    dashBtn.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (gameRunning && myPlayer) {
-            socket.emit('boost', true);
-        }
-    });
-    
-    dashBtn.addEventListener('mouseup', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (gameRunning && myPlayer) {
-            socket.emit('boost', false);
-        }
-    });
-}
-
-if (splitBtn) {
-    // Split functionality removed for simplified gameplay - can be re-added later
-    splitBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-    }, { passive: false });
-    
-    splitBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-    });
-}
-
-// Leaderboard drag functionality for mobile and desktop
-let leaderboardDrag = {
-    isDragging: false,
-    startX: 0,
-    startY: 0,
-    initialLeft: 0,
-    initialTop: 0
-};
-
-const startDrag = (clientX, clientY) => {
-    leaderboardDrag.isDragging = true;
-    leaderboardDrag.startX = clientX;
-    leaderboardDrag.startY = clientY;
-    
-    const rect = leaderboard.getBoundingClientRect();
-    leaderboardDrag.initialLeft = rect.left;
-    leaderboardDrag.initialTop = rect.top;
-    
-    leaderboard.classList.add('dragging');
-};
-
-const moveDrag = (clientX, clientY) => {
-    if (!leaderboardDrag.isDragging) return;
-    
-    const deltaX = clientX - leaderboardDrag.startX;
-    const deltaY = clientY - leaderboardDrag.startY;
-    
-    leaderboard.style.left = (leaderboardDrag.initialLeft + deltaX) + 'px';
-    leaderboard.style.top = (leaderboardDrag.initialTop + deltaY) + 'px';
-    leaderboard.style.right = 'auto';
-};
-
-const endDrag = () => {
-    leaderboardDrag.isDragging = false;
-    leaderboard.classList.remove('dragging');
-};
-
-// Touch events for leaderboard
-leaderboard.addEventListener('touchstart', (e) => {
-    const header = e.target.closest('h3');
-    if (!header) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
-    const touch = e.touches[0];
-    startDrag(touch.clientX, touch.clientY);
-}, { passive: false, capture: true });
-
-leaderboard.addEventListener('touchmove', (e) => {
-    if (!leaderboardDrag.isDragging) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
-    const touch = e.touches[0];
-    moveDrag(touch.clientX, touch.clientY);
-}, { passive: false, capture: true });
-
-leaderboard.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    endDrag();
-});
-
-leaderboard.addEventListener('touchcancel', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    endDrag();
-});
-
-// Mouse events for leaderboard
-leaderboard.addEventListener('mousedown', (e) => {
-    const header = e.target.closest('h3');
-    if (!header) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
-    startDrag(e.clientX, e.clientY);
-});
-
-document.addEventListener('mousemove', (e) => {
-    if (!leaderboardDrag.isDragging) return;
-    
-    e.preventDefault();
-    moveDrag(e.clientX, e.clientY);
-});
-
-document.addEventListener('mouseup', () => {
-    endDrag();
-});
-
-// Input handling - optimized for mobile and desktop
+// Input handling
 let mouseX = 0, mouseY = 0;
 let keys = {};
-let touchActive = false;
-let touchStartTime = 0;
-let lastTouchX = 0, lastTouchY = 0;
 
-// Mouse movement for desktop
 canvas.addEventListener('mousemove', (e) => {
-    if (!touchActive) {
-        mouseX = e.clientX;
-        mouseY = e.clientY;
-    }
+    mouseX = e.clientX;
+    mouseY = e.clientY;
 });
 
-canvas.addEventListener('mousedown', (e) => {
-    if (gameRunning && myPlayer && !e.target.closest('#mobileControls') && !e.target.closest('#abilities')) {
-        socket.emit('boost', true);
-    }
-});
-
-canvas.addEventListener('mouseup', () => {
+canvas.addEventListener('mousedown', () => {
     if (gameRunning && myPlayer) {
-        socket.emit('boost', false);
+        socket.emit('useAbility', 'dash');
     }
 });
 
-// Touch handling for mobile - improved tracking
 canvas.addEventListener('touchstart', (e) => {
-    // Don't handle touch if it's on UI elements with pointer-events
-    if (e.target.closest('#mobileControls') || e.target.closest('#leaderboard') || e.target.closest('#abilities')) {
-        return;
+    if (e.target.id === 'dashBtn') {
+        if (gameRunning && myPlayer) {
+            socket.emit('useAbility', 'dash');
+        }
+    } else if (e.target.id === 'splitBtn') {
+        if (gameRunning && myPlayer) {
+            socket.emit('useAbility', 'split');
+        }
+    } else {
+        const touch = e.touches[0];
+        mouseX = touch.clientX;
+        mouseY = touch.clientY;
     }
-    const touch = e.touches[0];
-    mouseX = touch.clientX;
-    mouseY = touch.clientY;
-    lastTouchX = touch.clientX;
-    lastTouchY = touch.clientY;
-    touchActive = true;
-    touchStartTime = Date.now();
-    
-    if (gameRunning && myPlayer) {
-        socket.emit('boost', true);
-    }
-}, { passive: false, capture: true });
+}, { passive: false });
 
 canvas.addEventListener('touchmove', (e) => {
-    if (e.target.closest('#mobileControls') || e.target.closest('#leaderboard') || e.target.closest('#abilities')) {
-        return;
-    }
     e.preventDefault();
     const touch = e.touches[0];
     mouseX = touch.clientX;
     mouseY = touch.clientY;
-    lastTouchX = touch.clientX;
-    lastTouchY = touch.clientY;
-}, { passive: false, capture: true });
-
-canvas.addEventListener('touchend', (e) => {
-    if (e.target.closest('#mobileControls') || e.target.closest('#leaderboard') || e.target.closest('#abilities')) {
-        return;
-    }
-    touchActive = false;
-    if (gameRunning && myPlayer) {
-        socket.emit('boost', false);
-    }
-});
-
-canvas.addEventListener('touchcancel', (e) => {
-    touchActive = false;
-    if (gameRunning && myPlayer) {
-        socket.emit('boost', false);
-    }
-});
+}, { passive: false });
 
 document.addEventListener('keydown', (e) => {
     keys[e.key.toLowerCase()] = true;
     
     if (e.code === 'Space' && gameRunning && myPlayer) {
-        socket.emit('boost', true);
+        socket.emit('useAbility', 'dash');
+    }
+    
+    if ((e.key === 'w' || e.key === 'W') && gameRunning && myPlayer) {
+        socket.emit('useAbility', 'split');
     }
 });
 
 document.addEventListener('keyup', (e) => {
     keys[e.key.toLowerCase()] = false;
-    
-    if (e.code === 'Space' && gameRunning && myPlayer) {
-        socket.emit('boost', false);
-    }
 });
 
-// Send input to server - optimized with throttling
-const INPUT_INTERVAL = 1000 / 30; // 30 updates per second
-
+// Send input to server
 setInterval(() => {
     if (gameRunning && myPlayer) {
         let targetX, targetY;
         
-        // Keyboard control with WASD/Arrow keys
-        const speed = 100;
-        let keyboardActive = false;
-        
+        // Keyboard control
         if (keys['arrowup'] || keys['w']) {
-            targetY = myPlayer.y - speed;
-            keyboardActive = true;
+            targetY = myPlayer.y - 100;
         }
         if (keys['arrowdown'] || keys['s']) {
-            targetY = myPlayer.y + speed;
-            keyboardActive = true;
+            targetY = myPlayer.y + 100;
         }
         if (keys['arrowleft'] || keys['a']) {
-            targetX = myPlayer.x - speed;
-            keyboardActive = true;
+            targetX = myPlayer.x - 100;
         }
         if (keys['arrowright'] || keys['d']) {
-            targetX = myPlayer.x + speed;
-            keyboardActive = true;
+            targetX = myPlayer.x + 100;
         }
         
-        // Mouse/touch takes priority for direction when not using keyboard
-        if (!keyboardActive && (mouseX !== 0 || mouseY !== 0)) {
+        // Mouse/touch takes priority
+        if (mouseX !== 0 || mouseY !== 0) {
             targetX = camera.x + mouseX;
             targetY = camera.y + mouseY;
         }
         
-        // Only send input if we have valid targets
         if (targetX !== undefined || targetY !== undefined) {
             socket.emit('input', {
                 x: targetX !== undefined ? targetX : myPlayer.x,
-                y: targetY !== undefined ? targetY : myPlayer.y,
-                boost: keys[' '] || false
-            });
-        } else if (touchActive) {
-            // If touch is active but no movement, still send current position
-            socket.emit('input', {
-                x: camera.x + mouseX,
-                y: camera.y + mouseY,
-                boost: false
+                y: targetY !== undefined ? targetY : myPlayer.y
             });
         }
     }
-}, INPUT_INTERVAL);
+}, 1000 / 30);
 
 // Drawing functions
 function drawShape(ctx, shape, x, y, size, color) {
@@ -599,15 +394,8 @@ function drawMinimap() {
     }
 }
 
-// Main game loop with FPS throttling
-function gameLoop(timestamp) {
-    // Throttle to target FPS
-    if (timestamp - lastRenderTime < FRAME_INTERVAL) {
-        requestAnimationFrame(gameLoop);
-        return;
-    }
-    lastRenderTime = timestamp;
-    
+// Main game loop
+function gameLoop() {
     // Clear canvas
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -617,7 +405,7 @@ function gameLoop(timestamp) {
         drawGrid();
         drawCenterZone();
         
-        // Draw food (optimized: only visible items)
+        // Draw food
         foods.forEach(food => {
             const screenX = food.x - camera.x;
             const screenY = food.y - camera.y;
@@ -647,7 +435,7 @@ function gameLoop(timestamp) {
             }
         });
         
-        // Draw players (optimized: only visible)
+        // Draw players
         Object.values(players).forEach(player => {
             const screenX = player.x - camera.x;
             const screenY = player.y - camera.y;
@@ -657,19 +445,19 @@ function gameLoop(timestamp) {
                 screenY > -100 && screenY < canvas.height + 100) {
                 
                 // Draw crown for #1 player
-                if (player.crown) {
+                if (player.isCrowned) {
                     ctx.font = '30px Arial';
-                    ctx.fillText('👑', screenX - 15, screenY - player.radius - 20);
+                    ctx.fillText('👑', screenX - 15, screenY - player.mass - 20);
                 }
                 
                 // Draw player
-                drawShape(ctx, player.skin || 'circle', screenX, screenY, player.radius, player.color);
+                drawShape(ctx, player.shape || 'circle', screenX, screenY, player.mass, player.color);
                 
                 // Draw name
                 ctx.fillStyle = '#fff';
                 ctx.font = '14px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText(player.name || 'Anonymous', screenX, screenY - player.radius - 10);
+                ctx.fillText(player.name || 'Anonymous', screenX, screenY - player.mass - 10);
             }
         });
         
@@ -684,7 +472,7 @@ function gameLoop(timestamp) {
     requestAnimationFrame(gameLoop);
 }
 
-// Start game loop with timestamp
-gameLoop(0);
+// Start game loop
+gameLoop();
 
-console.log('run.io client loaded - optimized for mobile and performance');
+console.log('run.io client loaded');
