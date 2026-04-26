@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="format-detection" content="telephone=no">
     <title>run.io - Multiplayer Battle Arena</title>
     <style>
         * {
@@ -11,13 +15,27 @@
             box-sizing: border-box;
             user-select: none;
             -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            overflow: hidden;
         }
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            overflow: hidden;
             background: #1a1a2e;
             color: white;
+            touch-action: none;
+            -webkit-text-size-adjust: none;
+            overscroll-behavior: none;
+            position: relative;
         }
         
         #gameCanvas {
@@ -209,19 +227,41 @@
         
         #leaderboard {
             position: absolute;
-            top: 20px;
-            right: 20px;
+            top: 10px;
+            right: 10px;
             background: rgba(0, 0, 0, 0.7);
             border-radius: 10px;
-            padding: 15px;
-            min-width: 200px;
+            padding: 12px;
+            min-width: 180px;
             backdrop-filter: blur(5px);
+            pointer-events: auto;
+            max-height: 250px;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+            max-width: 220px;
+            z-index: 50;
+            transform: translateZ(0);
+            will-change: transform;
+        }
+        
+        #leaderboard.dragging {
+            opacity: 0.9;
+            cursor: grabbing;
+            transform: translateZ(0);
         }
         
         #leaderboard h3 {
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             color: #feca57;
             text-align: center;
+            font-size: 1rem;
+            cursor: grab;
+            padding: 8px;
+            -webkit-cursor-grab;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         #leaderboardList {
@@ -254,6 +294,7 @@
             border-radius: 50%;
             border: 2px solid rgba(255, 255, 255, 0.3);
             overflow: hidden;
+            pointer-events: auto;
         }
         
         #minimap {
@@ -269,6 +310,7 @@
             border-radius: 10px;
             padding: 15px;
             backdrop-filter: blur(5px);
+            pointer-events: auto;
         }
         
         #score {
@@ -286,25 +328,44 @@
             position: absolute;
             bottom: 80px;
             left: 50%;
-            transform: translateX(-50%);
+            transform: translateX(-50%) translateZ(0);
             display: flex;
-            gap: 15px;
+            gap: 20px;
+            pointer-events: auto;
+            z-index: 100;
+            will-change: transform;
         }
         
         .ability {
-            width: 50px;
-            height: 50px;
+            width: 60px;
+            height: 60px;
             background: rgba(0, 0, 0, 0.7);
             border-radius: 50%;
             display: flex;
             justify-content: center;
             align-items: center;
-            border: 2px solid rgba(255, 255, 255, 0.3);
+            border: 3px solid rgba(255, 255, 255, 0.4);
             position: relative;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform 0.1s ease, background 0.1s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            will-change: transform;
+        }
+        
+        .ability:active {
+            transform: scale(0.92) translateZ(0);
+            background: rgba(50, 50, 50, 0.8);
         }
         
         .ability-icon {
-            font-size: 1.5rem;
+            font-size: 1.8rem;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         .cooldown-overlay {
@@ -328,39 +389,104 @@
             position: absolute;
             bottom: 20px;
             left: 50%;
-            transform: translateX(-50%);
-            gap: 20px;
+            transform: translateX(-50%) translateZ(0);
+            gap: 25px;
             pointer-events: auto;
+            z-index: 200;
+            will-change: transform;
         }
         
         .mobile-btn {
-            width: 60px;
-            height: 60px;
-            background: rgba(255, 255, 255, 0.2);
+            width: 75px;
+            height: 75px;
+            background: rgba(255, 255, 255, 0.25);
             border-radius: 50%;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 1.5rem;
-            backdrop-filter: blur(5px);
-            border: 2px solid rgba(255, 255, 255, 0.3);
+            font-size: 2.2rem;
+            backdrop-filter: blur(10px);
+            border: 3px solid rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            transition: all 0.1s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            flex-shrink: 0;
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            will-change: transform;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        
+        .mobile-btn:active {
+            transform: scale(0.88) translateZ(0);
+            background: rgba(255, 255, 255, 0.45);
+        }
+        
+        #leaderboard {
+            pointer-events: auto;
+            touch-action: manipulation;
+            user-select: text;
+            -webkit-user-select: text;
         }
         
         @media (max-width: 768px) {
             .logo {
-                font-size: 3rem;
+                font-size: 2.5rem;
             }
             
             .menu-container {
                 padding: 1.5rem;
+                width: 95%;
             }
             
             #mobileControls {
                 display: flex;
+                bottom: 30px;
+            }
+            
+            .mobile-btn {
+                width: 80px;
+                height: 80px;
+                font-size: 2.4rem;
             }
             
             #abilities {
-                bottom: 100px;
+                bottom: 130px;
+                gap: 25px;
+            }
+            
+            .ability {
+                width: 65px;
+                height: 65px;
+            }
+            
+            .ability-icon {
+                font-size: 2rem;
+            }
+            
+            #leaderboard {
+                top: 8px;
+                right: 8px;
+                min-width: 160px;
+                max-width: 180px;
+                padding: 10px;
+                max-height: 220px;
+            }
+            
+            #stats {
+                bottom: 8px;
+                left: 8px;
+                padding: 10px;
+            }
+            
+            #minimapContainer {
+                bottom: 8px;
+                right: 8px;
+                width: 110px;
+                height: 110px;
             }
         }
     </style>
