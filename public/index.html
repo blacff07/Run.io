@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>run.io - Multiplayer Battle Arena</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background: #1a1a2e;
+            color: white;
+        }
+        
+        #gameCanvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        #mainMenu {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+            z-index: 100;
+        }
+        
+        .logo {
+            font-size: 5rem;
+            font-weight: 900;
+            background: linear-gradient(45deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(255, 255, 255, 0.3);
+            margin-bottom: 1rem;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            color: #a0a0a0;
+            margin-bottom: 3rem;
+            text-align: center;
+        }
+        
+        .menu-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            width: 90%;
+        }
+        
+        .input-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+        
+        #playerName {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 1rem;
+            outline: none;
+        }
+        
+        .color-picker {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        
+        .color-option {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .color-option.selected {
+            border-color: white;
+            transform: scale(1.2);
+        }
+        
+        .shape-picker {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .shape-option {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .shape-option.selected {
+            border-color: #48dbfb;
+            background: rgba(72, 219, 251, 0.2);
+        }
+        
+        .shape-preview {
+            width: 20px;
+            height: 20px;
+        }
+        
+        #playBtn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(45deg, #ff6b6b, #feca57);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 1.2rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        #playBtn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+        
+        .controls-info {
+            margin-top: 2rem;
+            text-align: center;
+            color: #a0a0a0;
+            font-size: 0.9rem;
+        }
+        
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+            text-align: left;
+        }
+        
+        .control-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+        }
+        
+        #hud {
+            display: none;
+            pointer-events: none;
+        }
+        
+        #leaderboard {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 10px;
+            padding: 15px;
+            min-width: 200px;
+            backdrop-filter: blur(5px);
+        }
+        
+        #leaderboard h3 {
+            margin-bottom: 10px;
+            color: #feca57;
+            text-align: center;
+        }
+        
+        #leaderboardList {
+            list-style: none;
+        }
+        
+        #leaderboardList li {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        #leaderboardList li:last-child {
+            border-bottom: none;
+        }
+        
+        .crown {
+            color: gold;
+            margin-right: 5px;
+        }
+        
+        #minimapContainer {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 150px;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            overflow: hidden;
+        }
+        
+        #minimap {
+            width: 100%;
+            height: 100%;
+        }
+        
+        #stats {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 10px;
+            padding: 15px;
+            backdrop-filter: blur(5px);
+        }
+        
+        #score {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #48dbfb;
+        }
+        
+        #mass {
+            font-size: 0.9rem;
+            color: #a0a0a0;
+        }
+        
+        #abilities {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+        }
+        
+        .ability {
+            width: 50px;
+            height: 50px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            position: relative;
+        }
+        
+        .ability-icon {
+            font-size: 1.5rem;
+        }
+        
+        .cooldown-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-weight: bold;
+            opacity: 0;
+        }
+        
+        #mobileControls {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            gap: 20px;
+            pointer-events: auto;
+        }
+        
+        .mobile-btn {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            backdrop-filter: blur(5px);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        @media (max-width: 768px) {
+            .logo {
+                font-size: 3rem;
+            }
+            
+            .menu-container {
+                padding: 1.5rem;
+            }
+            
+            #mobileControls {
+                display: flex;
+            }
+            
+            #abilities {
+                bottom: 100px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui">
+        <!-- Main Menu -->
+        <div id="mainMenu">
+            <h1 class="logo">run.io</h1>
+            <p class="subtitle">Battle, Grow, Dominate in the Ultimate Arena</p>
+            
+            <div class="menu-container">
+                <div class="input-group">
+                    <label for="playerName">Enter Your Name</label>
+                    <input type="text" id="playerName" placeholder="Player1" maxlength="12">
+                </div>
+                
+                <div class="input-group">
+                    <label>Choose Color</label>
+                    <div class="color-picker" id="colorPicker"></div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Choose Shape</label>
+                    <div class="shape-picker" id="shapePicker"></div>
+                </div>
+                
+                <button id="playBtn">Play Now</button>
+                
+                <div class="controls-info">
+                    <strong>How to Play:</strong>
+                    <div class="controls-grid">
+                        <div class="control-item">🖱️ Mouse/Touch to Move</div>
+                        <div class="control-item">⌨️ WASD/Arrows to Move</div>
+                        <div class="control-item">⚡ Space/Click to Dash</div>
+                        <div class="control-item">✂️ W Key to Split</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- HUD (Hidden during menu) -->
+        <div id="hud">
+            <div id="leaderboard">
+                <h3>🏆 Leaderboard</h3>
+                <ul id="leaderboardList"></ul>
+            </div>
+            
+            <div id="minimapContainer">
+                <canvas id="minimap" width="150" height="150"></canvas>
+            </div>
+            
+            <div id="stats">
+                <div id="score">Score: 0</div>
+                <div id="mass">Mass: 10</div>
+            </div>
+            
+            <div id="abilities">
+                <div class="ability">
+                    <div class="ability-icon">⚡</div>
+                    <div class="cooldown-overlay" id="dashCooldown"></div>
+                </div>
+                <div class="ability">
+                    <div class="ability-icon">✂️</div>
+                    <div class="cooldown-overlay" id="splitCooldown"></div>
+                </div>
+            </div>
+            
+            <div id="mobileControls">
+                <div class="mobile-btn" id="dashBtn">⚡</div>
+                <div class="mobile-btn" id="splitBtn">✂️</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
