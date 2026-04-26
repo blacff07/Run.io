@@ -24,6 +24,7 @@ let socket;
 let playerId = null;
 let players = {};
 let foods = [];
+let powerups = [];
 let particles = [];
 let floatingTexts = [];
 let myPlayer = null;
@@ -31,6 +32,11 @@ let camera = { x: 0, y: 0 };
 let selectedColor = '#ff6b6b';
 let selectedShape = 'circle';
 let gameRunning = false;
+let dashAvailable = true;
+let dashCooldownTime = 0;
+let activePowerups = {};
+let combo = 0;
+let killFeed = [];
 
 // Performance optimization: throttle rendering
 let lastRenderTime = 0;
@@ -107,11 +113,17 @@ socket.on('connect', () => {
 socket.on('gameInit', (data) => {
     playerId = data.playerId;
     console.log('Game initialized with player ID:', playerId);
+    
+    // Store dash configuration
+    if (data.config) {
+        dashCooldownTime = data.config.dashCooldown;
+    }
 });
 
 socket.on('gameState', (state) => {
     players = state.players;
     foods = state.foods || [];
+    powerups = state.powerups || [];
     
     if (players[playerId]) {
         myPlayer = players[playerId];
@@ -121,12 +133,62 @@ socket.on('gameState', (state) => {
         scoreEl.textContent = `Score: ${Math.floor(myPlayer.score || 0)}`;
         massEl.textContent = `Mass: ${Math.floor(myPlayer.radius || 20)}`;
         
+        // Update combo display
+        combo = myPlayer.combo || 0;
+        if (combo >= 3) {
+            scoreEl.textContent += ` 🔥 x${combo}`;
+        }
+        
+        // Update dash cooldown
+        if (myPlayer.dashCooldown !== undefined) {
+            dashAvailable = myPlayer.dashCooldown === 0;
+            updateDashUI();
+        }
+        
+        // Update active powerups
+        if (myPlayer.powerups && myPlayer.powerups.length > 0) {
+            myPlayer.powerups.forEach(type => {
+                if (!activePowerups[type]) {
+                    activePowerups[type] = Date.now();
+                    showFloatingText(`+${type}!`, '#ffff00');
+                }
+            });
+        } else {
+            activePowerups = {};
+        }
+        
         // Update camera to follow player smoothly
         const targetCamX = myPlayer.x - canvas.width / 2;
         const targetCamY = myPlayer.y - canvas.height / 2;
         camera.x += (targetCamX - camera.x) * 0.1;
         camera.y += (targetCamY - camera.y) * 0.1;
     }
+});
+
+socket.on('powerupCollected', (data) => {
+    showFloatingText(`${data.effect}!`, data.type === 'speed' ? '#00ffff' : 
+                     data.type === 'shield' ? '#ffff00' : 
+                     data.type === 'magnet' ? '#ff00ff' : '#ff6600');
+});
+
+socket.on('kill', (data) => {
+    if (data.isStreak) {
+        showFloatingText(`🔥 KILLING SPREE! x${data.combo}`, '#ff4500', 60);
+    }
+    killFeed.push({
+        killer: 'You',
+        victim: data.victim,
+        time: Date.now()
+    });
+    if (killFeed.length > 5) killFeed.shift();
+});
+
+socket.on('dashUsed', (data) => {
+    dashAvailable = false;
+    setTimeout(() => {
+        dashAvailable = true;
+        updateDashUI();
+    }, data.cooldown);
 });
 
 socket.on('leaderboard', (leaderboard) => {
@@ -178,6 +240,16 @@ const dashBtn = document.getElementById('dashBtn');
 const splitBtn = document.getElementById('splitBtn');
 
 if (dashBtn) {
+    // Dash button now triggers the dash ability
+    dashBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (gameRunning && myPlayer && dashAvailable) {
+            socket.emit('dash');
+        }
+    });
+    
+    // Hold for boost still works
     dashBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -210,6 +282,14 @@ if (dashBtn) {
         }
     });
 }
+
+// Add double-click handler for dash on canvas
+let lastClickTime = 0;
+canvas.addEventListener('dblclick', (e) => {
+    if (gameRunning && myPlayer && dashAvailable) {
+        socket.emit('dash');
+    }
+});
 
 if (splitBtn) {
     // Split functionality removed for simplified gameplay - can be re-added later
@@ -562,7 +642,7 @@ function drawFloatingTexts() {
     floatingTexts.forEach((text, index) => {
         ctx.globalAlpha = text.life;
         ctx.fillStyle = text.color;
-        ctx.font = 'bold 20px Arial';
+        ctx.font = text.size || 'bold 20px Arial';
         ctx.fillText(text.text, text.x - camera.x, text.y - camera.y);
         ctx.globalAlpha = 1;
         
@@ -573,6 +653,30 @@ function drawFloatingTexts() {
             floatingTexts.splice(index, 1);
         }
     });
+}
+
+function showFloatingText(text, color, size = 20) {
+    if (!myPlayer) return;
+    floatingTexts.push({
+        text: text,
+        x: myPlayer.x,
+        y: myPlayer.y - 50,
+        life: 1,
+        color: color,
+        size: `bold ${size}px Arial`
+    });
+}
+
+function updateDashUI() {
+    if (dashBtn) {
+        if (dashAvailable) {
+            dashBtn.style.opacity = '1';
+            dashBtn.style.filter = 'none';
+        } else {
+            dashBtn.style.opacity = '0.5';
+            dashBtn.style.filter = 'grayscale(100%)';
+        }
+    }
 }
 
 function drawMinimap() {
@@ -642,8 +746,35 @@ function gameLoop(timestamp) {
                     ctx.shadowColor = color;
                 }
                 
-                drawShape(ctx, 'circle', screenX, screenY, food.size, color);
+                drawShape(ctx, 'circle', screenX, screenY, food.size || food.radius, color);
                 ctx.shadowBlur = 0;
+            }
+        });
+        
+        // Draw powerups
+        powerups.forEach(powerup => {
+            const screenX = powerup.x - camera.x;
+            const screenY = powerup.y - camera.y;
+            
+            if (screenX > -50 && screenX < canvas.width + 50 && 
+                screenY > -50 && screenY < canvas.height + 50) {
+                
+                // Pulsing effect
+                const pulse = Math.sin(Date.now() / 200) * 3;
+                
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = powerup.color;
+                drawShape(ctx, 'circle', screenX, screenY, (powerup.radius || 15) + pulse, powerup.color);
+                ctx.shadowBlur = 0;
+                
+                // Icon indicator
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                const icon = powerup.type === 'speed' ? '⚡' : 
+                            powerup.type === 'shield' ? '🛡️' : 
+                            powerup.type === 'magnet' ? '🧲' : '✨';
+                ctx.fillText(icon, screenX, screenY + 4);
             }
         });
         
@@ -656,14 +787,43 @@ function gameLoop(timestamp) {
             if (screenX > -100 && screenX < canvas.width + 100 && 
                 screenY > -100 && screenY < canvas.height + 100) {
                 
+                // Draw shield effect
+                if (player.powerups && player.powerups.includes('shield')) {
+                    ctx.strokeStyle = '#ffff00';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, player.radius + 5, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    // Shield glow
+                    ctx.fillStyle = 'rgba(255, 255, 0, 0.2)';
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, player.radius + 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Draw speed effect
+                if (player.powerups && player.powerups.includes('speed')) {
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = '#00ffff';
+                }
+                
                 // Draw crown for #1 player
                 if (player.crown) {
                     ctx.font = '30px Arial';
                     ctx.fillText('👑', screenX - 15, screenY - player.radius - 20);
                 }
                 
+                // Draw combo indicator for high combos
+                if (player.combo >= 5) {
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillStyle = '#ff4500';
+                    ctx.fillText(`🔥x${player.combo}`, screenX, screenY - player.radius - 35);
+                }
+                
                 // Draw player
                 drawShape(ctx, player.skin || 'circle', screenX, screenY, player.radius, player.color);
+                ctx.shadowBlur = 0;
                 
                 // Draw name
                 ctx.fillStyle = '#fff';

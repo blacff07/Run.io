@@ -20,18 +20,29 @@ const CONFIG = {
   MIN_ZOOM: 0.3,
   MAX_ZOOM: 1.5,
   BASE_SPEED: 3,
-  FOOD_COUNT: 400,
-  BOT_COUNT: 5,
+  FOOD_COUNT: 500,
+  BOT_COUNT: 8,
   CENTER_ZONE_RADIUS: 400,
   COLORS: ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'],
   SKINS: ['circle', 'square', 'triangle', 'star'],
   FOOD_TIERS: [
-    { radius: 5, value: 1, color: '#a8e6cf', weight: 0.6 },
+    { radius: 5, value: 1, color: '#a8e6cf', weight: 0.5 },
     { radius: 8, value: 3, color: '#dcedc1', weight: 0.25 },
-    { radius: 12, value: 8, color: '#ffd3b6', weight: 0.1 },
-    { radius: 18, value: 20, color: '#ffaaa5', weight: 0.04 },
-    { radius: 25, value: 50, color: '#ff8b94', weight: 0.01 }
-  ]
+    { radius: 12, value: 8, color: '#ffd3b6', weight: 0.12 },
+    { radius: 18, value: 20, color: '#ffaaa5', weight: 0.08 },
+    { radius: 25, value: 50, color: '#ff8b94', weight: 0.05 }
+  ],
+  POWERUPS: [
+    { type: 'speed', duration: 5000, color: '#00ffff', radius: 15, effect: 'Speed Boost' },
+    { type: 'shield', duration: 4000, color: '#ffff00', radius: 15, effect: 'Shield' },
+    { type: 'magnet', duration: 6000, color: '#ff00ff', radius: 15, effect: 'Magnet' },
+    { type: 'doublePoints', duration: 8000, color: '#ff6600', radius: 15, effect: '2x Points' }
+  ],
+  DASH_COOLDOWN: 3000,
+  DASH_DURATION: 300,
+  DASH_MULTIPLIER: 3,
+  COMBO_WINDOW: 2000,
+  MAX_COMBO: 20
 };
 
 // Game State
@@ -39,6 +50,7 @@ let players = {};
 let foods = [];
 let bots = {};
 let leaderboard = [];
+let powerups = [];
 
 // Helper Functions
 function randomRange(min, max) {
@@ -108,6 +120,19 @@ function spawnFood(tierOverride = null) {
   });
 }
 
+function spawnPowerup() {
+  const powerupConfig = CONFIG.POWERUPS[Math.floor(Math.random() * CONFIG.POWERUPS.length)];
+  const pos = getRandomPosition();
+  
+  powerups.push({
+    id: uuidv4(),
+    x: pos.x,
+    y: pos.y,
+    ...powerupConfig,
+    spawnTime: Date.now()
+  });
+}
+
 function createBot() {
   const id = `bot_${uuidv4()}`;
   const pos = getRandomPosition(true);
@@ -124,7 +149,12 @@ function createBot() {
     targetY: pos.y,
     changeTargetTime: Date.now() + randomRange(1000, 3000),
     isBot: true,
-    velocity: { x: 0, y: 0 }
+    velocity: { x: 0, y: 0 },
+    dashCooldown: 0,
+    lastDashTime: 0,
+    powerups: {},
+    combo: 0,
+    lastKillTime: 0
   };
   bots[id] = bot;
   return bot;
@@ -235,14 +265,26 @@ io.on('connection', (socket) => {
       input: { x: 0, y: 0, boost: false },
       velocity: { x: 0, y: 0 },
       crown: false,
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
+      dashCooldown: 0,
+      lastDashTime: 0,
+      isDashing: false,
+      powerups: {},
+      combo: 0,
+      lastKillTime: 0,
+      kills: 0,
+      deaths: 0
     };
 
     socket.emit('gameInit', {
       playerId: socket.id,
       mapSize: CONFIG.MAP_SIZE,
       colors: CONFIG.COLORS,
-      skins: CONFIG.SKINS
+      skins: CONFIG.SKINS,
+      config: {
+        dashCooldown: CONFIG.DASH_COOLDOWN,
+        dashDuration: CONFIG.DASH_DURATION
+      }
     });
   });
 
@@ -262,6 +304,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('dash', () => {
+    const player = players[socket.id];
+    if (player && player.dashCooldown === 0) {
+      player.isDashing = true;
+      player.lastDashTime = Date.now();
+      player.dashCooldown = CONFIG.DASH_COOLDOWN;
+      
+      // Send dash confirmation with cooldown info
+      socket.emit('dashUsed', {
+        cooldown: CONFIG.DASH_COOLDOWN,
+        duration: CONFIG.DASH_DURATION
+      });
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log(`Player disconnected: ${socket.id}`);
     delete players[socket.id];
@@ -277,9 +334,43 @@ function gameLoop() {
   const delta = (now - lastTime) / 1000;
   lastTime = now;
 
+  // Spawn powerups periodically
+  if (powerups.length < 5 && Math.random() < 0.01) {
+    spawnPowerup();
+  }
+  
+  // Remove expired powerups
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    if (now - powerups[i].spawnTime > 30000) {
+      powerups.splice(i, 1);
+    }
+  }
+
   // Update players
   for (const pid in players) {
     const player = players[pid];
+    
+    // Handle dash mechanics
+    if (player.isDashing && now - player.lastDashTime > CONFIG.DASH_DURATION) {
+      player.isDashing = false;
+    }
+    
+    // Update dash cooldown
+    if (player.dashCooldown > 0 && now - player.lastDashTime > CONFIG.DASH_COOLDOWN) {
+      player.dashCooldown = 0;
+    }
+    
+    // Expire powerups
+    for (const powerupType in player.powerups) {
+      if (now - player.powerups[powerupType].endTime > 0) {
+        delete player.powerups[powerupType];
+      }
+    }
+    
+    // Update combo decay
+    if (player.combo > 0 && now - player.lastKillTime > CONFIG.COMBO_WINDOW) {
+      player.combo = Math.max(0, player.combo - 1);
+    }
     
     // Handle input
     let moveX = player.input.x;
@@ -294,8 +385,17 @@ function gameLoop() {
       }
     }
 
-    // Calculate speed based on size
-    const speed = CONFIG.BASE_SPEED * Math.pow(player.radius, -0.1) * (player.input.boost ? 1.5 : 1);
+    // Calculate speed based on size with modifiers
+    let speed = CONFIG.BASE_SPEED * Math.pow(player.radius, -0.1);
+    
+    // Apply boost
+    if (player.input.boost) speed *= 1.5;
+    
+    // Apply dash
+    if (player.isDashing) speed *= CONFIG.DASH_MULTIPLIER;
+    
+    // Apply speed powerup
+    if (player.powerups.speed) speed *= 1.5;
     
     player.velocity.x = moveX * speed;
     player.velocity.y = moveY * speed;
@@ -318,16 +418,63 @@ function gameLoop() {
   // Collision detection - Players with Food
   for (const pid in players) {
     const player = players[pid];
+    
+    // Check food collision with magnet effect
+    let magnetRange = player.radius;
+    if (player.powerups.magnet) magnetRange *= 3;
+    
     for (let i = foods.length - 1; i >= 0; i--) {
       const food = foods[i];
+      const dist = getDistance(player.x, player.y, food.x, food.y);
+      
+      // Magnet effect - attract food
+      if (player.powerups.magnet && dist < magnetRange && dist > player.radius + food.radius) {
+        const angle = Math.atan2(player.y - food.y, player.x - food.x);
+        food.x += Math.cos(angle) * 5;
+        food.y += Math.sin(angle) * 5;
+      }
+      
       if (checkCollision(player.x, player.y, player.radius, food.x, food.y, food.radius)) {
-        player.score += food.value;
+        let value = food.value;
+        
+        // Double points powerup
+        if (player.powerups.doublePoints) value *= 2;
+        
+        // Combo bonus
+        if (player.combo > 1) value *= (1 + player.combo * 0.1);
+        
+        player.score += value;
         player.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + player.score / 100, 0.3);
         foods.splice(i, 1);
         spawnFood();
         
         // Small chance to spawn extra food
         if (Math.random() < 0.1) spawnFood();
+      }
+    }
+    
+    // Check powerup collision
+    for (let i = powerups.length - 1; i >= 0; i--) {
+      const powerup = powerups[i];
+      if (checkCollision(player.x, player.y, player.radius, powerup.x, powerup.y, powerup.radius)) {
+        // Apply powerup
+        player.powerups[powerup.type] = {
+          endTime: Date.now() + powerup.duration,
+          type: powerup.type
+        };
+        
+        // Send notification to player
+        const playerSocket = io.sockets.sockets.get(pid);
+        if (playerSocket) {
+          playerSocket.emit('powerupCollected', {
+            type: powerup.type,
+            effect: powerup.effect,
+            duration: powerup.duration
+          });
+        }
+        
+        powerups.splice(i, 1);
+        setTimeout(() => spawnPowerup(), 10000);
       }
     }
   }
@@ -342,6 +489,18 @@ function gameLoop() {
         bot.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + bot.score / 100, 0.3);
         foods.splice(i, 1);
         spawnFood();
+      }
+    }
+    
+    // Bot powerup collection
+    for (let i = powerups.length - 1; i >= 0; i--) {
+      const powerup = powerups[i];
+      if (checkCollision(bot.x, bot.y, bot.radius, powerup.x, powerup.y, powerup.radius)) {
+        bot.powerups[powerup.type] = {
+          endTime: Date.now() + powerup.duration,
+          type: powerup.type
+        };
+        powerups.splice(i, 1);
       }
     }
   }
@@ -361,33 +520,92 @@ function gameLoop() {
       const minEatRadius = Math.max(e1.radius, e2.radius) * 1.2;
       
       if (dist < minEatRadius) {
+        // Check shield powerup - cannot be eaten while shielded
+        if (e2.powerups.shield && e1.radius > e2.radius * 1.1) {
+          // Shield blocks the attack, push back attacker
+          const angle = Math.atan2(e2.y - e1.y, e2.x - e1.x);
+          e1.x += Math.cos(angle) * 20;
+          e1.y += Math.sin(angle) * 20;
+          continue;
+        }
+        if (e1.powerups.shield && e2.radius > e1.radius * 1.1) {
+          const angle = Math.atan2(e1.y - e2.y, e1.x - e2.x);
+          e2.x += Math.cos(angle) * 20;
+          e2.y += Math.sin(angle) * 20;
+          continue;
+        }
+        
         if (e1.radius > e2.radius * 1.1) {
           // e1 eats e2
-          e1.score += e2.score * 0.5;
+          e1.score += e2.score * 0.5 + e2.radius * 2;
           e1.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + e1.score / 100, 0.3);
+          
+          // Track kills and combo
+          if (!e1.isBot) {
+            e1.kills++;
+            e1.lastKillTime = Date.now();
+            e1.combo = Math.min(CONFIG.MAX_COMBO, e1.combo + 1);
+            
+            // Send kill notification
+            const e1Socket = io.sockets.sockets.get(e1.id);
+            if (e1Socket) {
+              e1Socket.emit('kill', {
+                victim: e2.name,
+                combo: e1.combo,
+                isStreak: e1.combo >= 3
+              });
+            }
+          }
           
           if (e2.isBot) {
             delete bots[e2.id];
             setTimeout(createBot, 3000);
           } else {
+            e2.deaths++;
             const e2Socket = io.sockets.sockets.get(e2.id);
             if (e2Socket) {
-              e2Socket.emit('death', { killer: e1.name });
+              e2Socket.emit('death', { 
+                killer: e1.name,
+                kills: e1.kills,
+                combo: e1.combo
+              });
               delete players[e2.id];
             }
           }
         } else if (e2.radius > e1.radius * 1.1) {
           // e2 eats e1
-          e2.score += e1.score * 0.5;
+          e2.score += e1.score * 0.5 + e1.radius * 2;
           e2.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + e2.score / 100, 0.3);
+          
+          // Track kills and combo
+          if (!e2.isBot) {
+            e2.kills++;
+            e2.lastKillTime = Date.now();
+            e2.combo = Math.min(CONFIG.MAX_COMBO, e2.combo + 1);
+            
+            // Send kill notification
+            const e2Socket = io.sockets.sockets.get(e2.id);
+            if (e2Socket) {
+              e2Socket.emit('kill', {
+                victim: e1.name,
+                combo: e2.combo,
+                isStreak: e2.combo >= 3
+              });
+            }
+          }
           
           if (e1.isBot) {
             delete bots[e1.id];
             setTimeout(createBot, 3000);
           } else {
+            e1.deaths++;
             const e1Socket = io.sockets.sockets.get(e1.id);
             if (e1Socket) {
-              e1Socket.emit('death', { killer: e2.name });
+              e1Socket.emit('death', { 
+                killer: e2.name,
+                kills: e2.kills,
+                combo: e2.combo
+              });
               delete players[e1.id];
             }
           }
@@ -415,9 +633,20 @@ function gameLoop() {
       skin: p.skin,
       name: p.name,
       score: Math.floor(p.score),
-      crown: p.crown
+      crown: p.crown,
+      powerups: Object.keys(p.powerups),
+      combo: p.combo,
+      dashCooldown: p.dashCooldown
     })),
-    foods: foods.slice(0, 100), // Send only nearby foods for optimization
+    foods: foods.slice(0, 100),
+    powerups: powerups.map(p => ({
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      type: p.type,
+      color: p.color,
+      radius: p.radius
+    })),
     leaderboard,
     centerZone: {
       x: CONFIG.MAP_SIZE / 2,
