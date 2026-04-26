@@ -71,15 +71,24 @@ function checkCollision(x1, y1, r1, x2, y2, r2) {
 
 function getRandomPosition(avoidCenter = false) {
   let x, y;
+  let attempts = 0;
+  const maxAttempts = 10;
+  
   do {
     x = randomRange(CONFIG.INITIAL_PLAYER_RADIUS, CONFIG.MAP_SIZE - CONFIG.INITIAL_PLAYER_RADIUS);
     y = randomRange(CONFIG.INITIAL_PLAYER_RADIUS, CONFIG.MAP_SIZE - CONFIG.INITIAL_PLAYER_RADIUS);
+    
     if (avoidCenter) {
       const distFromCenter = getDistance(x, y, CONFIG.MAP_SIZE / 2, CONFIG.MAP_SIZE / 2);
-      if (distFromCenter < CONFIG.CENTER_ZONE_RADIUS + 200) continue;
+      if (distFromCenter < CONFIG.CENTER_ZONE_RADIUS + 200) {
+        attempts++;
+        if (attempts >= maxAttempts) break;
+        continue;
+      }
     }
     break;
-  } while (false);
+  } while (true);
+  
   return { x, y };
 }
 
@@ -415,7 +424,16 @@ function gameLoop() {
     updateBot(bots[bid]);
   }
 
-  // Collision detection - Players with Food
+  // Collision detection - Players with Food (optimized with spatial filtering)
+  const visibleFoods = foods.filter(f => {
+    // Only check foods that might be near players
+    for (const pid in players) {
+      const p = players[pid];
+      if (getDistance(p.x, p.y, f.x, f.y) < 500) return true;
+    }
+    return false;
+  });
+  
   for (const pid in players) {
     const player = players[pid];
     
@@ -426,6 +444,9 @@ function gameLoop() {
     for (let i = foods.length - 1; i >= 0; i--) {
       const food = foods[i];
       const dist = getDistance(player.x, player.y, food.x, food.y);
+      
+      // Skip distant foods for performance
+      if (dist > 500 && !player.powerups.magnet) continue;
       
       // Magnet effect - attract food
       if (player.powerups.magnet && dist < magnetRange && dist > player.radius + food.radius) {
@@ -505,108 +526,146 @@ function gameLoop() {
     }
   }
 
-  // Player vs Player collision
+  // Player vs Player collision (optimized with distance check first)
   const allEntities = [...Object.values(players), ...Object.values(bots)];
   
-  for (let i = 0; i < allEntities.length; i++) {
-    for (let j = i + 1; j < allEntities.length; j++) {
-      const e1 = allEntities[i];
-      const e2 = allEntities[j];
-      
-      // Skip if both are bots
-      if (e1.isBot && e2.isBot) continue;
-      
-      const dist = getDistance(e1.x, e1.y, e2.x, e2.y);
-      const minEatRadius = Math.max(e1.radius, e2.radius) * 1.2;
-      
-      if (dist < minEatRadius) {
-        // Check shield powerup - cannot be eaten while shielded
-        if (e2.powerups.shield && e1.radius > e2.radius * 1.1) {
-          // Shield blocks the attack, push back attacker
-          const angle = Math.atan2(e2.y - e1.y, e2.x - e1.x);
-          e1.x += Math.cos(angle) * 20;
-          e1.y += Math.sin(angle) * 20;
-          continue;
-        }
-        if (e1.powerups.shield && e2.radius > e1.radius * 1.1) {
-          const angle = Math.atan2(e1.y - e2.y, e1.x - e2.x);
-          e2.x += Math.cos(angle) * 20;
-          e2.y += Math.sin(angle) * 20;
-          continue;
-        }
+  // Create spatial hash for optimization
+  const CELL_SIZE = 200;
+  const spatialHash = new Map();
+  
+  // Populate spatial hash
+  for (const entity of allEntities) {
+    const cellX = Math.floor(entity.x / CELL_SIZE);
+    const cellY = Math.floor(entity.y / CELL_SIZE);
+    const key = `${cellX},${cellY}`;
+    
+    if (!spatialHash.has(key)) {
+      spatialHash.set(key, []);
+    }
+    spatialHash.get(key).push(entity);
+  }
+  
+  // Only check collisions between entities in nearby cells
+  const checkedPairs = new Set();
+  
+  for (const [key, entities] of spatialHash) {
+    const [cellX, cellY] = key.split(',').map(Number);
+    
+    // Check adjacent cells too
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const neighborKey = `${cellX + dx},${cellY + dy}`;
+        const neighbors = spatialHash.get(neighborKey);
         
-        if (e1.radius > e2.radius * 1.1) {
-          // e1 eats e2
-          e1.score += e2.score * 0.5 + e2.radius * 2;
-          e1.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + e1.score / 100, 0.3);
-          
-          // Track kills and combo
-          if (!e1.isBot) {
-            e1.kills++;
-            e1.lastKillTime = Date.now();
-            e1.combo = Math.min(CONFIG.MAX_COMBO, e1.combo + 1);
+        if (!neighbors) continue;
+        
+        for (let i = 0; i < entities.length; i++) {
+          for (let j = 0; j < neighbors.length; j++) {
+            const e1 = entities[i];
+            const e2 = neighbors[j];
             
-            // Send kill notification
-            const e1Socket = io.sockets.sockets.get(e1.id);
-            if (e1Socket) {
-              e1Socket.emit('kill', {
-                victim: e2.name,
-                combo: e1.combo,
-                isStreak: e1.combo >= 3
-              });
-            }
-          }
-          
-          if (e2.isBot) {
-            delete bots[e2.id];
-            setTimeout(createBot, 3000);
-          } else {
-            e2.deaths++;
-            const e2Socket = io.sockets.sockets.get(e2.id);
-            if (e2Socket) {
-              e2Socket.emit('death', { 
-                killer: e1.name,
-                kills: e1.kills,
-                combo: e1.combo
-              });
-              delete players[e2.id];
-            }
-          }
-        } else if (e2.radius > e1.radius * 1.1) {
-          // e2 eats e1
-          e2.score += e1.score * 0.5 + e1.radius * 2;
-          e2.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + e2.score / 100, 0.3);
-          
-          // Track kills and combo
-          if (!e2.isBot) {
-            e2.kills++;
-            e2.lastKillTime = Date.now();
-            e2.combo = Math.min(CONFIG.MAX_COMBO, e2.combo + 1);
+            // Skip if same entity or both bots
+            if (e1.id === e2.id || (e1.isBot && e2.isBot)) continue;
             
-            // Send kill notification
-            const e2Socket = io.sockets.sockets.get(e2.id);
-            if (e2Socket) {
-              e2Socket.emit('kill', {
-                victim: e1.name,
-                combo: e2.combo,
-                isStreak: e2.combo >= 3
-              });
-            }
-          }
-          
-          if (e1.isBot) {
-            delete bots[e1.id];
-            setTimeout(createBot, 3000);
-          } else {
-            e1.deaths++;
-            const e1Socket = io.sockets.sockets.get(e1.id);
-            if (e1Socket) {
-              e1Socket.emit('death', { 
-                killer: e2.name,
-                kills: e2.kills,
-                combo: e2.combo
-              });
-              delete players[e1.id];
+            // Create unique pair key to avoid duplicate checks
+            const pairKey = e1.id < e2.id ? `${e1.id}-${e2.id}` : `${e2.id}-${e1.id}`;
+            if (checkedPairs.has(pairKey)) continue;
+            checkedPairs.add(pairKey);
+            
+            const dist = getDistance(e1.x, e1.y, e2.x, e2.y);
+            const minEatRadius = Math.max(e1.radius, e2.radius) * 1.2;
+            
+            if (dist < minEatRadius) {
+              // Check shield powerup - cannot be eaten while shielded
+              if (e2.powerups.shield && e1.radius > e2.radius * 1.1) {
+                // Shield blocks the attack, push back attacker
+                const angle = Math.atan2(e2.y - e1.y, e2.x - e1.x);
+                e1.x += Math.cos(angle) * 20;
+                e1.y += Math.sin(angle) * 20;
+                continue;
+              }
+              if (e1.powerups.shield && e2.radius > e1.radius * 1.1) {
+                const angle = Math.atan2(e1.y - e2.y, e1.x - e2.x);
+                e2.x += Math.cos(angle) * 20;
+                e2.y += Math.sin(angle) * 20;
+                continue;
+              }
+              
+              if (e1.radius > e2.radius * 1.1) {
+                // e1 eats e2
+                e1.score += e2.score * 0.5 + e2.radius * 2;
+                e1.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + e1.score / 100, 0.3);
+                
+                // Track kills and combo
+                if (!e1.isBot) {
+                  e1.kills++;
+                  e1.lastKillTime = Date.now();
+                  e1.combo = Math.min(CONFIG.MAX_COMBO, e1.combo + 1);
+                  
+                  // Send kill notification
+                  const e1Socket = io.sockets.sockets.get(e1.id);
+                  if (e1Socket) {
+                    e1Socket.emit('kill', {
+                      victim: e2.name,
+                      combo: e1.combo,
+                      isStreak: e1.combo >= 3
+                    });
+                  }
+                }
+                
+                if (e2.isBot) {
+                  delete bots[e2.id];
+                  setTimeout(createBot, 3000);
+                } else {
+                  e2.deaths++;
+                  const e2Socket = io.sockets.sockets.get(e2.id);
+                  if (e2Socket) {
+                    e2Socket.emit('death', { 
+                      killer: e1.name,
+                      kills: e1.kills,
+                      combo: e1.combo
+                    });
+                    delete players[e2.id];
+                  }
+                }
+              } else if (e2.radius > e1.radius * 1.1) {
+                // e2 eats e1
+                e2.score += e1.score * 0.5 + e1.radius * 2;
+                e2.radius = CONFIG.INITIAL_PLAYER_RADIUS * Math.pow(1 + e2.score / 100, 0.3);
+                
+                // Track kills and combo
+                if (!e2.isBot) {
+                  e2.kills++;
+                  e2.lastKillTime = Date.now();
+                  e2.combo = Math.min(CONFIG.MAX_COMBO, e2.combo + 1);
+                  
+                  // Send kill notification
+                  const e2Socket = io.sockets.sockets.get(e2.id);
+                  if (e2Socket) {
+                    e2Socket.emit('kill', {
+                      victim: e1.name,
+                      combo: e2.combo,
+                      isStreak: e2.combo >= 3
+                    });
+                  }
+                }
+                
+                if (e1.isBot) {
+                  delete bots[e1.id];
+                  setTimeout(createBot, 3000);
+                } else {
+                  e1.deaths++;
+                  const e1Socket = io.sockets.sockets.get(e1.id);
+                  if (e1Socket) {
+                    e1Socket.emit('death', { 
+                      killer: e2.name,
+                      kills: e2.kills,
+                      combo: e2.combo
+                    });
+                    delete players[e1.id];
+                  }
+                }
+              }
             }
           }
         }

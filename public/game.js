@@ -703,8 +703,20 @@ function drawMinimap() {
     }
 }
 
-// Main game loop with FPS throttling
+// Main game loop with FPS throttling and performance optimizations
+let frameCount = 0;
+let lastFpsUpdate = 0;
+let currentFps = 60;
+
 function gameLoop(timestamp) {
+    // Calculate FPS
+    frameCount++;
+    if (timestamp - lastFpsUpdate >= 1000) {
+        currentFps = frameCount;
+        frameCount = 0;
+        lastFpsUpdate = timestamp;
+    }
+    
     // Throttle to target FPS
     if (timestamp - lastRenderTime < FRAME_INTERVAL) {
         requestAnimationFrame(gameLoop);
@@ -721,8 +733,17 @@ function gameLoop(timestamp) {
         drawGrid();
         drawCenterZone();
         
-        // Draw food (optimized: only visible items)
-        foods.forEach(food => {
+        // Optimization: Calculate visible area once
+        const visibleMargin = 100;
+        const visibleLeft = camera.x - visibleMargin;
+        const visibleRight = camera.x + canvas.width + visibleMargin;
+        const visibleTop = camera.y - visibleMargin;
+        const visibleBottom = camera.y + canvas.height + visibleMargin;
+        
+        // Draw food (optimized: only visible items with batch rendering)
+        ctx.save();
+        for (let i = 0; i < foods.length; i++) {
+            const food = foods[i];
             const screenX = food.x - camera.x;
             const screenY = food.y - camera.y;
             
@@ -749,10 +770,13 @@ function gameLoop(timestamp) {
                 drawShape(ctx, 'circle', screenX, screenY, food.size || food.radius, color);
                 ctx.shadowBlur = 0;
             }
-        });
+        }
+        ctx.restore();
         
-        // Draw powerups
-        powerups.forEach(powerup => {
+        // Draw powerups (batched)
+        ctx.save();
+        for (let i = 0; i < powerups.length; i++) {
+            const powerup = powerups[i];
             const screenX = powerup.x - camera.x;
             const screenY = powerup.y - camera.y;
             
@@ -776,10 +800,15 @@ function gameLoop(timestamp) {
                             powerup.type === 'magnet' ? '🧲' : '✨';
                 ctx.fillText(icon, screenX, screenY + 4);
             }
-        });
+        }
+        ctx.restore();
         
-        // Draw players (optimized: only visible)
-        Object.values(players).forEach(player => {
+        // Draw players (optimized: sort by size for proper layering, batch rendering)
+        const sortedPlayers = Object.values(players).sort((a, b) => a.radius - b.radius);
+        
+        ctx.save();
+        for (let i = 0; i < sortedPlayers.length; i++) {
+            const player = sortedPlayers[i];
             const screenX = player.x - camera.x;
             const screenY = player.y - camera.y;
             
@@ -831,7 +860,8 @@ function gameLoop(timestamp) {
                 ctx.textAlign = 'center';
                 ctx.fillText(player.name || 'Anonymous', screenX, screenY - player.radius - 10);
             }
-        });
+        }
+        ctx.restore();
         
         // Draw effects
         drawParticles();
