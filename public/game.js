@@ -121,7 +121,14 @@ socket.on('gameInit', (data) => {
 });
 
 socket.on('gameState', (state) => {
-    players = state.players;
+    // Convert players array to object for easy lookup by ID
+    const playersObj = {};
+    if (Array.isArray(state.players)) {
+        state.players.forEach(p => {
+            playersObj[p.id] = p;
+        });
+    }
+    players = playersObj;
     foods = state.foods || [];
     powerups = state.powerups || [];
     
@@ -237,7 +244,6 @@ playBtn.addEventListener('click', () => {
 
 // Mobile button handlers
 const dashBtn = document.getElementById('dashBtn');
-const splitBtn = document.getElementById('splitBtn');
 
 if (dashBtn) {
     // Dash button now triggers the dash ability
@@ -291,14 +297,23 @@ canvas.addEventListener('dblclick', (e) => {
     }
 });
 
-if (splitBtn) {
-    // Split functionality removed for simplified gameplay - can be re-added later
-    splitBtn.addEventListener('touchstart', (e) => {
+// Add click handlers for ability buttons in desktop mode
+const dashAbilityBtn = document.getElementById('dashAbilityBtn');
+const splitAbilityBtn = document.getElementById('splitAbilityBtn');
+
+if (dashAbilityBtn) {
+    dashAbilityBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-    }, { passive: false });
-    
-    splitBtn.addEventListener('click', (e) => {
+        if (gameRunning && myPlayer && dashAvailable) {
+            socket.emit('dash');
+        }
+    });
+}
+
+if (splitAbilityBtn) {
+    // Split functionality removed for simplified gameplay - can be re-added later
+    splitAbilityBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
     });

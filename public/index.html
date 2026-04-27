@@ -222,7 +222,10 @@
         
         #hud {
             display: none;
-            pointer-events: none;
+        }
+        
+        #hud > * {
+            pointer-events: auto;
         }
         
         #leaderboard {
@@ -547,11 +550,11 @@
             </div>
             
             <div id="abilities">
-                <div class="ability">
+                <div class="ability" id="dashAbilityBtn">
                     <div class="ability-icon">⚡</div>
                     <div class="cooldown-overlay" id="dashCooldown"></div>
                 </div>
-                <div class="ability">
+                <div class="ability" id="splitAbilityBtn">
                     <div class="ability-icon">✂️</div>
                     <div class="cooldown-overlay" id="splitCooldown"></div>
                 </div>
