@@ -684,20 +684,37 @@ function gameLoop() {
 
   // Send game state to all players
   const gameState = {
-    players: Object.values(players).map(p => ({
-      id: p.id,
-      x: p.x,
-      y: p.y,
-      radius: p.radius,
-      color: p.color,
-      skin: p.skin,
-      name: p.name,
-      score: Math.floor(p.score),
-      crown: p.crown,
-      powerups: Object.keys(p.powerups),
-      combo: p.combo,
-      dashCooldown: p.dashCooldown
-    })),
+    players: [
+      ...Object.values(players).map(p => ({
+        id: p.id,
+        x: p.x,
+        y: p.y,
+        radius: p.radius,
+        color: p.color,
+        skin: p.skin,
+        name: p.name,
+        score: Math.floor(p.score),
+        crown: p.crown,
+        powerups: Object.keys(p.powerups),
+        combo: p.combo,
+        dashCooldown: p.dashCooldown
+      })),
+      ...Object.values(bots).map(b => ({
+        id: b.id,
+        x: b.x,
+        y: b.y,
+        radius: b.radius,
+        color: b.color,
+        skin: b.skin,
+        name: b.name,
+        score: Math.floor(b.score),
+        crown: b.crown,
+        powerups: Object.keys(b.powerups),
+        combo: b.combo,
+        dashCooldown: b.dashCooldown,
+        isBot: true
+      }))
+    ],
     foods: foods.slice(0, 100),
     powerups: powerups.map(p => ({
       id: p.id,
