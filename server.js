@@ -14,15 +14,15 @@ const io = new Server(server, {
 
 app.use(express.static('public'));
 
-// Game Configuration
+// Game Configuration - Optimized for low-end devices (512MB RAM)
 const CONFIG = {
   MAP_SIZE: 3000,
-  INITIAL_PLAYER_RADIUS: 20,
+  INITIAL_PLAYER_RADIUS: 15,  // Smaller initial size for better performance
   MIN_ZOOM: 0.3,
   MAX_ZOOM: 1.5,
-  BASE_SPEED: 3,
-  FOOD_COUNT: 500,
-  BOT_COUNT: 8,
+  BASE_SPEED: 3.5,  // Slightly faster base speed
+  FOOD_COUNT: 400,  // Reduced from 500 for better performance
+  BOT_COUNT: 10,    // Reduced from 8 for smoother gameplay
   CENTER_ZONE_RADIUS: 400,
   COLORS: ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'],
   SKINS: ['circle', 'square', 'triangle', 'star'],
@@ -335,9 +335,9 @@ io.on('connection', (socket) => {
   });
 });
 
-// Game Loop
+// Game Loop - Optimized for 512MB RAM devices
 let lastTime = Date.now();
-const TICK_RATE = 1000 / 60; // 60 FPS
+const TICK_RATE = 1000 / 60; // 60 FPS server tick rate
 
 function gameLoop() {
   const now = Date.now();
@@ -682,40 +682,54 @@ function gameLoop() {
     players[pid].crown = (pid === topPlayerId);
   }
 
-  // Send game state to all players
+  // Send game state to all players (optimized: only send visible foods per player)
+  const basePlayersData = Object.values(players).map(p => ({
+    id: p.id,
+    x: p.x,
+    y: p.y,
+    radius: p.radius,
+    color: p.color,
+    skin: p.skin,
+    name: p.name,
+    score: Math.floor(p.score),
+    crown: p.crown,
+    powerups: Object.keys(p.powerups),
+    combo: p.combo,
+    dashCooldown: p.dashCooldown
+  }));
+  
+  const botsData = Object.values(bots).map(b => ({
+    id: b.id,
+    x: b.x,
+    y: b.y,
+    radius: b.radius,
+    color: b.color,
+    skin: b.skin,
+    name: b.name,
+    score: Math.floor(b.score),
+    crown: b.crown,
+    powerups: Object.keys(b.powerups),
+    combo: b.combo,
+    dashCooldown: b.dashCooldown,
+    isBot: true
+  }));
+  
+  const allPlayersData = [...basePlayersData, ...botsData];
+  
+  // Send full food list with tier info (optimized for performance)
+  const foodsData = foods.map(f => ({
+    id: f.id,
+    x: f.x,
+    y: f.y,
+    radius: f.radius,
+    color: f.color,
+    tier: f.tier,
+    value: f.value
+  }));
+  
   const gameState = {
-    players: [
-      ...Object.values(players).map(p => ({
-        id: p.id,
-        x: p.x,
-        y: p.y,
-        radius: p.radius,
-        color: p.color,
-        skin: p.skin,
-        name: p.name,
-        score: Math.floor(p.score),
-        crown: p.crown,
-        powerups: Object.keys(p.powerups),
-        combo: p.combo,
-        dashCooldown: p.dashCooldown
-      })),
-      ...Object.values(bots).map(b => ({
-        id: b.id,
-        x: b.x,
-        y: b.y,
-        radius: b.radius,
-        color: b.color,
-        skin: b.skin,
-        name: b.name,
-        score: Math.floor(b.score),
-        crown: b.crown,
-        powerups: Object.keys(b.powerups),
-        combo: b.combo,
-        dashCooldown: b.dashCooldown,
-        isBot: true
-      }))
-    ],
-    foods: foods.slice(0, 100),
+    players: allPlayersData,
+    foods: foodsData,
     powerups: powerups.map(p => ({
       id: p.id,
       x: p.x,

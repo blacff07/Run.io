@@ -15,7 +15,6 @@ const leaderboardList = document.getElementById('leaderboardList');
 const scoreEl = document.getElementById('score');
 const massEl = document.getElementById('mass');
 const dashCooldownEl = document.getElementById('dashCooldown');
-const splitCooldownEl = document.getElementById('splitCooldown');
 const mobileControls = document.getElementById('mobileControls');
 const leaderboard = document.getElementById('leaderboard');
 
@@ -152,8 +151,8 @@ socket.on('gameState', (state) => {
             updateDashUI();
         }
         
-        // Update active powerups
-        if (myPlayer.powerups && myPlayer.powerups.length > 0) {
+        // Update active powerups (server sends array of strings now)
+        if (myPlayer.powerups && Array.isArray(myPlayer.powerups) && myPlayer.powerups.length > 0) {
             myPlayer.powerups.forEach(type => {
                 if (!activePowerups[type]) {
                     activePowerups[type] = Date.now();
@@ -164,11 +163,11 @@ socket.on('gameState', (state) => {
             activePowerups = {};
         }
         
-        // Update camera to follow player smoothly
+        // Update camera to follow player smoothly (optimized interpolation)
         const targetCamX = myPlayer.x - canvas.width / 2;
         const targetCamY = myPlayer.y - canvas.height / 2;
-        camera.x += (targetCamX - camera.x) * 0.1;
-        camera.y += (targetCamY - camera.y) * 0.1;
+        camera.x += (targetCamX - camera.x) * 0.15;
+        camera.y += (targetCamY - camera.y) * 0.15;
     }
 });
 
@@ -299,7 +298,6 @@ canvas.addEventListener('dblclick', (e) => {
 
 // Add click handlers for ability buttons in desktop mode
 const dashAbilityBtn = document.getElementById('dashAbilityBtn');
-const splitAbilityBtn = document.getElementById('splitAbilityBtn');
 
 if (dashAbilityBtn) {
     dashAbilityBtn.addEventListener('click', (e) => {
@@ -308,14 +306,6 @@ if (dashAbilityBtn) {
         if (gameRunning && myPlayer && dashAvailable) {
             socket.emit('dash');
         }
-    });
-}
-
-if (splitAbilityBtn) {
-    // Split functionality removed for simplified gameplay - can be re-added later
-    splitAbilityBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
     });
 }
 
@@ -500,12 +490,13 @@ document.addEventListener('keyup', (e) => {
     }
 });
 
-// Send input to server - optimized with throttling
-const INPUT_INTERVAL = 1000 / 30; // 30 updates per second
+// Send input to server - optimized with throttling (20 updates/sec for better performance)
+const INPUT_INTERVAL = 1000 / 20; // 20 updates per second
 
 setInterval(() => {
     if (gameRunning && myPlayer) {
-        let targetX, targetY;
+        let targetX = myPlayer.x;
+        let targetY = myPlayer.y;
         
         // Keyboard control with WASD/Arrow keys
         const speed = 100;
@@ -534,21 +525,12 @@ setInterval(() => {
             targetY = camera.y + mouseY;
         }
         
-        // Only send input if we have valid targets
-        if (targetX !== undefined || targetY !== undefined) {
-            socket.emit('input', {
-                x: targetX !== undefined ? targetX : myPlayer.x,
-                y: targetY !== undefined ? targetY : myPlayer.y,
-                boost: keys[' '] || false
-            });
-        } else if (touchActive) {
-            // If touch is active but no movement, still send current position
-            socket.emit('input', {
-                x: camera.x + mouseX,
-                y: camera.y + mouseY,
-                boost: false
-            });
-        }
+        // Send input to server
+        socket.emit('input', {
+            x: targetX,
+            y: targetY,
+            boost: keys[' '] || false
+        });
     }
 }, INPUT_INTERVAL);
 
@@ -592,9 +574,6 @@ function drawShape(ctx, shape, x, y, size, color) {
     }
     
     ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-    ctx.lineWidth = 3;
-    ctx.stroke();
 }
 
 function drawGrid() {
@@ -832,7 +811,7 @@ function gameLoop(timestamp) {
                 screenY > -100 && screenY < canvas.height + 100) {
                 
                 // Draw shield effect
-                if (player.powerups && player.powerups.includes('shield')) {
+                if (player.powerups && Array.isArray(player.powerups) && player.powerups.includes('shield')) {
                     ctx.strokeStyle = '#ffff00';
                     ctx.lineWidth = 3;
                     ctx.beginPath();
@@ -847,7 +826,7 @@ function gameLoop(timestamp) {
                 }
                 
                 // Draw speed effect
-                if (player.powerups && player.powerups.includes('speed')) {
+                if (player.powerups && Array.isArray(player.powerups) && player.powerups.includes('speed')) {
                     ctx.shadowBlur = 10;
                     ctx.shadowColor = '#00ffff';
                 }
